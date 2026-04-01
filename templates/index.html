@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>TechRadar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:      #0a0b0d;
+  --surface: #111318;
+  --border:  #1e2028;
+  --border2: #2a2d38;
+  --text:    #c8cdd8;
+  --muted:   #4a5068;
+  --accent:  #00e5a0;
+  --accent2: #0095ff;
+  --warn:    #ff6b35;
+  --dim:     #1a1d24;
+
+  --cat-language:  #a78bfa;
+  --cat-framework: #34d399;
+  --cat-tool:      #60a5fa;
+  --cat-protocol:  #fbbf24;
+  --cat-concept:   #f472b6;
+  --cat-pattern:   #818cf8;
+  --cat-cloud:     #38bdf8;
+  --cat-database:  #fb923c;
+  --cat-security:  #f87171;
+  --cat-architecture: #00e5a0;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'IBM Plex Sans', sans-serif;
+  font-size: 14px;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── Header ── */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 200;
+  height: 52px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.logo-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  flex-shrink: 0;
+}
+.logo-dot.listening { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse {
+  0%,100% { transform:scale(1); box-shadow:0 0 8px var(--accent); }
+  50%      { transform:scale(1.5); box-shadow:0 0 18px var(--accent); }
+}
+
+.header-right { display:flex; align-items:center; gap:8px; }
+
+.status-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  padding: 3px 9px;
+  border-radius: 20px;
+  border: 1px solid var(--border2);
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.status-badge.listening { color:var(--accent); border-color:var(--accent); background:rgba(0,229,160,0.06); }
+.status-badge.error     { color:var(--warn);   border-color:var(--warn); }
+
+/* ── Buttons ── */
+.btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border2);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn:hover        { background: var(--dim); }
+.btn-primary      { background:var(--accent); color:#000; border-color:var(--accent); font-weight:600; }
+.btn-primary:hover{ background:#00ffb3; }
+.btn-stop         { border-color:var(--warn); color:var(--warn); }
+.btn-stop:hover   { background:rgba(255,107,53,0.1); }
+.btn-ghost        { border-color:transparent; color:var(--muted); font-size:11px; padding:5px 8px; }
+.btn-ghost:hover  { color:var(--text); background:var(--dim); }
+
+/* ── Main 3-column layout (desktop) ── */
+.main {
+  display: grid;
+  grid-template-columns: 1fr 1fr 300px;
+  height: 100vh;
+  padding-top: 52px;
+}
+
+.col-feed {
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-right: 1px solid var(--border);
+}
+
+.col-detail {
+  overflow-y: auto;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.col-sidebar {
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* ── Empty state ── */
+.empty-state {
+  margin: auto;
+  text-align: center;
+  color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  line-height: 2;
+  padding: 40px 20px;
+}
+.empty-state .icon { font-size: 32px; margin-bottom: 12px; }
+
+/* ── Cards ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 11px 13px;
+  position: relative;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  animation: slideIn 0.3s cubic-bezier(0.16,1,0.3,1);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.card::before {
+  content:'';
+  position:absolute;
+  left:0; top:0; bottom:0;
+  width:3px;
+  background: var(--cat-color, var(--accent));
+  border-radius: 9px 0 0 9px;
+}
+.card.active {
+  border-color: var(--accent2);
+  background: rgba(0,149,255,0.06);
+}
+.card:hover { border-color: var(--border2); }
+
+@keyframes slideIn {
+  from { opacity:0; transform:translateY(-10px) scale(0.98); }
+  to   { opacity:1; transform:translateY(0) scale(1); }
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.card-term {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cat-badge {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(255,255,255,0.05);
+  color: var(--cat-color, var(--muted));
+  border: 1px solid currentColor;
+  opacity: 0.85;
+  flex-shrink: 0;
+  max-width: 110px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-time {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.card-summary {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.more-btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--accent2);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  letter-spacing: 0.04em;
+  align-self: flex-start;
+  opacity: 0.8;
+}
+.more-btn:hover { opacity: 1; }
+
+/* ── Detail panel (desktop) ── */
+.detail-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.detail-header-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex: 1;
+}
+.detail-close-btn {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  background: none;
+  border: 1px solid var(--border2);
+  cursor: pointer;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+.detail-close-btn:hover { color:var(--text); }
+
+.detail-body-wrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 16px;
+}
+.detail-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  text-align: center;
+  gap: 10px;
+  opacity: 0.5;
+}
+.detail-empty .icon { font-size: 26px; }
+
+.detail-term-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 20px;
+  font-weight: 600;
+  color: #fff;
+  margin-bottom: 6px;
+  line-height: 1.25;
+}
+.detail-cat-pill {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 9px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  display: inline-block;
+  margin-bottom: 14px;
+}
+.detail-summary-text {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text);
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-full-text {
+  font-size: 13px;
+  line-height: 1.85;
+  color: #8b92a8;
+}
+.detail-ts {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Sidebar ── */
+.sidebar-section {
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.sidebar-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.controls { display:flex; flex-direction:column; gap:7px; }
+.device-info {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--dim);
+  padding: 7px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+}
+.stats { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+.stat {
+  background: var(--dim);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px;
+  text-align: center;
+}
+.stat-num {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--accent);
+  line-height: 1;
+}
+.stat-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  color: var(--muted);
+  margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.model-pills { display:flex; flex-direction:column; gap:5px; }
+.model-pill {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border2);
+  background: var(--dim);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.pill-label { color:var(--muted); }
+.pill-val   { color:var(--text); flex:1; }
+.pill-ok    { color:var(--accent); font-size:9px; }
+.pill-err   { color:var(--warn);   font-size:9px; }
+
+.transcript-box {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+}
+.tx-line {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  animation: fadeIn 0.3s ease;
+}
+.tx-line span { color: var(--text); font-size: 10.5px; }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+
+/* ── Bottom sheet (mobile) ── */
+.sheet-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 300;
+  backdrop-filter: blur(2px);
+}
+.sheet-overlay.open { display: block; }
+
+.bottom-sheet {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border2);
+  border-radius: 16px 16px 0 0;
+  z-index: 301;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  transform: translateY(100%);
+  transition: transform 0.35s cubic-bezier(0.16,1,0.3,1);
+}
+.bottom-sheet.open { transform: translateY(0); }
+
+.sheet-handle-row {
+  display: flex;
+  justify-content: center;
+  padding: 10px 0 4px;
+  flex-shrink: 0;
+}
+.sheet-handle {
+  width: 36px; height: 4px;
+  background: var(--border2);
+  border-radius: 2px;
+}
+.sheet-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px 12px;
+  flex-shrink: 0;
+}
+.sheet-title {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 16px;
+  font-weight: 600;
+  color: #fff;
+  flex: 1;
+}
+.sheet-close {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--dim);
+  border: 1px solid var(--border2);
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 4px 10px;
+}
+.sheet-content {
+  overflow-y: auto;
+  padding: 0 16px 32px;
+  flex: 1;
+}
+.sheet-cat-pill {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 9px;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+  display: inline-block;
+  margin-bottom: 12px;
+}
+.sheet-summary {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text);
+  margin-bottom: 14px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.sheet-detail {
+  font-size: 14px;
+  line-height: 1.85;
+  color: #8b92a8;
+}
+.sheet-ts {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* ── Mobile layout ── */
+@media (max-width: 768px) {
+  .col-detail  { display: none; }
+  .col-sidebar { display: none; }
+  .main {
+    grid-template-columns: 1fr;
+    padding-bottom: 72px; /* space for mobile toolbar */
+  }
+  .col-feed { padding: 12px; }
+
+  /* Mobile bottom toolbar */
+  .mobile-toolbar {
+    display: flex !important;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 60px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    z-index: 200;
+    align-items: center;
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .mobile-toolbar .device-info-mobile {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+@media (min-width: 769px) {
+  .mobile-toolbar { display: none !important; }
+  .sheet-overlay, .bottom-sheet { display: none !important; }
+}
+
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.error-banner {
+  background: rgba(255,107,53,0.1);
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  padding: 9px 14px;
+  border-radius: 7px;
+  display: none;
+}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">
+    <div class="logo-dot" id="logoDot"></div>
+    TECHRADAR
+  </div>
+  <div class="header-right">
+    <span class="status-badge" id="statusBadge">idle</span>
+  </div>
+</header>
+
+<!-- 3-col main -->
+<div class="main">
+
+  <!-- Col 1: Cards feed -->
+  <div class="col-feed" id="feedArea">
+    <div class="error-banner" id="errorBanner"></div>
+    <div class="empty-state" id="emptyState">
+      <div class="icon">📡</div>
+      Start listening to detect tech terms<br>
+      <span style="font-size:10px;color:#2a2d38">from any audio playing on your Mac</span>
+    </div>
+  </div>
+
+  <!-- Col 2: Detail panel (desktop) -->
+  <div class="col-detail">
+    <div class="detail-header">
+      <span class="detail-header-label">Details</span>
+      <button class="detail-close-btn" onclick="closeDetail()">✕ close</button>
+    </div>
+    <div class="detail-body-wrap" id="detailBody">
+      <div class="detail-empty">
+        <div class="icon">🔍</div>
+        Tap <strong>+ more</strong> on any card
+      </div>
+    </div>
+  </div>
+
+  <!-- Col 3: Sidebar (desktop) -->
+  <div class="col-sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Controls</div>
+      <div class="controls">
+        <div class="device-info" id="deviceInfo">Checking audio device...</div>
+        <button class="btn btn-primary" id="startBtn" onclick="startListening()">▶ Start Listening</button>
+        <button class="btn btn-stop"    id="stopBtn"  onclick="stopListening()" style="display:none">■ Stop</button>
+        <button class="btn btn-ghost"   onclick="clearCards()">Clear cards</button>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Stats</div>
+      <div class="stats">
+        <div class="stat"><div class="stat-num" id="statCards">0</div><div class="stat-label">Terms</div></div>
+        <div class="stat"><div class="stat-num" id="statChunks">0</div><div class="stat-label">Chunks</div></div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">Local Models</div>
+      <div class="model-pills">
+        <div class="model-pill">
+          <span class="pill-label">Whisper</span>
+          <span class="pill-val" id="whisperPill">small</span>
+          <span class="pill-ok">✓ local</span>
+        </div>
+        <div class="model-pill">
+          <span class="pill-label">Ollama</span>
+          <span class="pill-val" id="ollamaPill">llama3.2</span>
+          <span id="ollamaStatus" class="pill-ok">checking…</span>
+        </div>
+      </div>
+    </div>
+    <div class="sidebar-section" style="flex:1;overflow:hidden;display:flex;flex-direction:column;border-bottom:none;">
+      <div class="sidebar-label">Live Transcript</div>
+      <div class="transcript-box" id="transcriptBox">
+        <div class="tx-line" style="color:#2a2d38">Transcript will appear here...</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /.main -->
+
+<!-- Mobile toolbar -->
+<div class="mobile-toolbar" id="mobileToolbar">
+  <div class="device-info-mobile" id="deviceInfoMobile">No audio device</div>
+  <button class="btn btn-primary" id="startBtnMobile" onclick="startListening()" style="font-size:11px;padding:6px 12px">▶ Start</button>
+  <button class="btn btn-stop"   id="stopBtnMobile"  onclick="stopListening()" style="display:none;font-size:11px;padding:6px 12px">■ Stop</button>
+  <button class="btn btn-ghost"  onclick="clearCards()">Clear</button>
+</div>
+
+<!-- Bottom sheet overlay (mobile) -->
+<div class="sheet-overlay" id="sheetOverlay" onclick="closeSheet()"></div>
+<div class="bottom-sheet" id="bottomSheet">
+  <div class="sheet-handle-row"><div class="sheet-handle"></div></div>
+  <div class="sheet-header">
+    <div class="sheet-title" id="sheetTitle">Term</div>
+    <button class="sheet-close" onclick="closeSheet()">✕</button>
+  </div>
+  <div class="sheet-content" id="sheetContent"></div>
+</div>
+
+<script>
+// ── Category colors ───────────────────────────────────────────
+const CAT_COLORS = {
+  language:     'var(--cat-language)',
+  framework:    'var(--cat-framework)',
+  tool:         'var(--cat-tool)',
+  protocol:     'var(--cat-protocol)',
+  concept:      'var(--cat-concept)',
+  pattern:      'var(--cat-pattern)',
+  cloud:        'var(--cat-cloud)',
+  database:     'var(--cat-database)',
+  security:     'var(--cat-security)',
+  architecture: 'var(--cat-architecture)',
+};
+
+// ── State ─────────────────────────────────────────────────────
+let cardCount  = 0;
+let chunkCount = 0;
+let eventSource = null;
+const seenTerms = new Set();
+const MAX_CARDS = 50;
+let activeCard  = null;
+
+function isMobile() { return window.innerWidth <= 768; }
+
+// ── Detail panel (desktop) ────────────────────────────────────
+function openDetail(card) {
+  const color = CAT_COLORS[card.category] || 'var(--accent)';
+  document.getElementById('detailBody').innerHTML = `
+    <div class="detail-term-title">${esc(card.term)}</div>
+    <span class="detail-cat-pill" style="color:${color};border-color:${color}">${esc(card.category)}</span>
+    <div class="detail-summary-text">${esc(card.summary)}</div>
+    <div class="detail-full-text">${esc(card.detail)}</div>
+    <div class="detail-ts">Detected at ${esc(card.timestamp)}</div>
+  `;
+}
+
+function closeDetail() {
+  document.getElementById('detailBody').innerHTML = `
+    <div class="detail-empty"><div class="icon">🔍</div>Tap <strong>+ more</strong> on any card</div>
+  `;
+  if (activeCard) {
+    activeCard.classList.remove('active');
+    const btn = activeCard.querySelector('.more-btn');
+    if (btn) btn.textContent = '+ more';
+    activeCard = null;
+  }
+}
+
+// ── Bottom sheet (mobile) ─────────────────────────────────────
+function openSheet(card) {
+  const color = CAT_COLORS[card.category] || 'var(--accent)';
+  document.getElementById('sheetTitle').textContent = card.term;
+  document.getElementById('sheetContent').innerHTML = `
+    <span class="sheet-cat-pill" style="color:${color};border-color:${color}">${esc(card.category)}</span>
+    <div class="sheet-summary">${esc(card.summary)}</div>
+    <div class="sheet-detail">${esc(card.detail)}</div>
+    <div class="sheet-ts">Detected at ${esc(card.timestamp)}</div>
+  `;
+  document.getElementById('sheetOverlay').classList.add('open');
+  document.getElementById('bottomSheet').classList.add('open');
+}
+
+function closeSheet() {
+  document.getElementById('sheetOverlay').classList.remove('open');
+  document.getElementById('bottomSheet').classList.remove('open');
+  if (activeCard) {
+    activeCard.classList.remove('active');
+    const btn = activeCard.querySelector('.more-btn');
+    if (btn) btn.textContent = '+ more';
+    activeCard = null;
+  }
+}
+
+// ── Add card ──────────────────────────────────────────────────
+function addCard(card) {
+  const termKey = card.term.toLowerCase().trim();
+  if (seenTerms.has(termKey)) return;
+  seenTerms.add(termKey);
+
+  const emptyState = document.getElementById('emptyState');
+  if (emptyState) emptyState.remove();
+
+  const color = CAT_COLORS[card.category] || 'var(--accent)';
+
+  const div = document.createElement('div');
+  div.className = 'card';
+  div.style.setProperty('--cat-color', color);
+  div.id = 'card-' + card.id;
+
+  // Header
+  const header = document.createElement('div');
+  header.className = 'card-header';
+
+  const termEl = document.createElement('span');
+  termEl.className = 'card-term';
+  termEl.textContent = card.term;
+
+  const badge = document.createElement('span');
+  badge.className = 'cat-badge';
+  badge.style.setProperty('--cat-color', color);
+  badge.textContent = card.category;
+
+  const timeEl = document.createElement('span');
+  timeEl.className = 'card-time';
+  timeEl.textContent = card.timestamp;
+
+  header.appendChild(termEl);
+  header.appendChild(badge);
+  header.appendChild(timeEl);
+
+  // Summary
+  const summary = document.createElement('div');
+  summary.className = 'card-summary';
+  summary.textContent = card.summary || '';
+
+  // More button
+  const moreBtn = document.createElement('button');
+  moreBtn.className = 'more-btn';
+  moreBtn.textContent = '+ more';
+  moreBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    // Deactivate previous
+    if (activeCard && activeCard !== div) {
+      activeCard.classList.remove('active');
+      const prevBtn = activeCard.querySelector('.more-btn');
+      if (prevBtn) prevBtn.textContent = '+ more';
+    }
+    activeCard = div;
+    div.classList.add('active');
+    moreBtn.textContent = '● open';
+
+    if (isMobile()) {
+      openSheet(card);
+    } else {
+      openDetail(card);
+    }
+  });
+
+  div.appendChild(header);
+  div.appendChild(summary);
+  div.appendChild(moreBtn);
+
+  const feedArea = document.getElementById('feedArea');
+  const errorBanner = document.getElementById('errorBanner');
+  if (errorBanner && errorBanner.nextSibling) {
+    feedArea.insertBefore(div, errorBanner.nextSibling);
+  } else {
+    feedArea.insertBefore(div, feedArea.firstChild);
+  }
+
+  // Cap feed size
+  const allCards = feedArea.querySelectorAll('.card');
+  if (allCards.length > MAX_CARDS) allCards[allCards.length - 1].remove();
+
+  cardCount++;
+  document.getElementById('statCards').textContent = cardCount;
+}
+
+// ── Transcript ────────────────────────────────────────────────
+function addTranscript(text) {
+  const box = document.getElementById('transcriptBox');
+  const line = document.createElement('div');
+  line.className = 'tx-line';
+  const now = new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  line.innerHTML = `<span style="color:var(--muted)">${now} </span><span>${esc(text)}</span>`;
+  box.insertBefore(line, box.firstChild);
+  while (box.children.length > 20) box.removeChild(box.lastChild);
+  chunkCount++;
+  document.getElementById('statChunks').textContent = chunkCount;
+}
+
+// ── Status ────────────────────────────────────────────────────
+function updateStatus(status, device) {
+  const badge     = document.getElementById('statusBadge');
+  const dot       = document.getElementById('logoDot');
+  const startBtn  = document.getElementById('startBtn');
+  const stopBtn   = document.getElementById('stopBtn');
+  const startBtnM = document.getElementById('startBtnMobile');
+  const stopBtnM  = document.getElementById('stopBtnMobile');
+
+  badge.textContent = status;
+  badge.className   = 'status-badge ' + status;
+
+  const isListening = status === 'listening';
+  dot.classList.toggle('listening', isListening);
+
+  startBtn.style.display  = isListening ? 'none'  : 'block';
+  stopBtn.style.display   = isListening ? 'block' : 'none';
+  startBtnM.style.display = isListening ? 'none'  : 'block';
+  stopBtnM.style.display  = isListening ? 'block' : 'none';
+
+  if (device) {
+    const di = '🎙 ' + device;
+    document.getElementById('deviceInfo').textContent = di;
+    document.getElementById('deviceInfoMobile').textContent = di;
+  }
+}
+
+function showError(msg) {
+  const b = document.getElementById('errorBanner');
+  if (b) { b.textContent = '⚠ ' + msg; b.style.display = 'block'; }
+}
+
+// ── SSE ───────────────────────────────────────────────────────
+function connectSSE() {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource('/stream');
+
+  eventSource.addEventListener('init', e => {
+    const d = JSON.parse(e.data);
+    d.cards.forEach(addCard);
+    updateStatus(d.status);
+  });
+  eventSource.addEventListener('card',       e => addCard(JSON.parse(e.data)));
+  eventSource.addEventListener('transcript', e => addTranscript(JSON.parse(e.data).text));
+  eventSource.addEventListener('status',     e => {
+    const d = JSON.parse(e.data);
+    updateStatus(d.status, d.device);
+  });
+  eventSource.addEventListener('error', e => {
+    showError(JSON.parse(e.data).message);
+    updateStatus('error');
+  });
+  eventSource.addEventListener('clear', () => {
+    document.getElementById('feedArea').innerHTML =
+      '<div class="error-banner" id="errorBanner"></div>' +
+      '<div class="empty-state" id="emptyState"><div class="icon">📡</div>Start listening to detect tech terms</div>';
+    seenTerms.clear();
+    cardCount = 0;
+    document.getElementById('statCards').textContent = '0';
+    closeDetail();
+  });
+  eventSource.onerror = () => setTimeout(connectSSE, 3000);
+}
+
+// ── API ───────────────────────────────────────────────────────
+async function startListening() {
+  const r = await fetch('/api/start', {method:'POST'});
+  const d = await r.json();
+  if (!d.ok) showError(d.message);
+}
+async function stopListening() { await fetch('/api/stop',  {method:'POST'}); }
+async function clearCards()    { await fetch('/api/clear', {method:'POST'}); }
+
+// ── Devices ───────────────────────────────────────────────────
+async function checkDevices() {
+  try {
+    const r    = await fetch('/api/devices');
+    const data = await r.json();
+    const info = document.getElementById('deviceInfo');
+    const infoM = document.getElementById('deviceInfoMobile');
+
+    if (data.blackhole_index !== null) {
+      const dev = data.devices.find(d => d.index === data.blackhole_index);
+      const txt = '🎙 ' + (dev ? dev.name : 'BlackHole detected');
+      info.textContent  = txt;
+      infoM.textContent = txt;
+      info.style.color  = 'var(--accent)';
+    } else {
+      const txt = '⚠ BlackHole not found';
+      info.textContent  = txt;
+      infoM.textContent = txt;
+      info.style.color  = 'var(--warn)';
+    }
+    const wp = document.getElementById('whisperPill');
+    if (wp && data.whisper_model) wp.textContent = data.whisper_model;
+    const op = document.getElementById('ollamaPill');
+    const os = document.getElementById('ollamaStatus');
+    if (op && data.ollama_model) op.textContent = data.ollama_model;
+    if (os) {
+      os.textContent = data.ollama_ok ? '✓ running' : '✗ offline';
+      os.className   = data.ollama_ok ? 'pill-ok'   : 'pill-err';
+    }
+  } catch(e) {}
+}
+
+function esc(str) {
+  return String(str||'')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ──────────────────────────────────────────────────────
+connectSSE();
+checkDevices();
+</script>
+</body>
+</html>
