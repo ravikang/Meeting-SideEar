@@ -1,8 +1,69 @@
-# 📡 TechRadar — free / local edition
+# 👂 Meeting Side-Ear
 
-Real-time tech term detector. Listens to your Mac's audio (calls, tutorials, videos), spots tech jargon, and shows instant summaries — viewable on your phone too.
+Your silent AI companion for enterprise meetings. Listens to audio playing on your Mac — conference calls, tutorials, demos — detects technical terms from AI, data, banking, and IBM technology domains, and shows instant explanations. Viewable on your phone too.
 
 **100% free. Nothing leaves your Mac.**
+
+---
+
+## Architecture
+
+Meeting Side-Ear uses a **dual-pipeline** approach to deliver both a real-time transcript and term detection cards simultaneously:
+
+```
+                    ┌─────────────────────────────────────┐
+Mac Audio           │           Audio Capture              │
+(BlackHole) ───────▶│     continuous 16kHz mono stream     │
+                    └──────────┬──────────────┬────────────┘
+                               │              │
+                    ┌──────────▼───┐  ┌───────▼──────────┐
+  PIPELINE A (fast) │  2s chunks   │  │   8s chunks       │ PIPELINE B (slow)
+  Live transcript   │  beam_size=1 │  │   beam_size=5     │ Term detection
+                    └──────────┬───┘  └───────┬──────────┘
+                               │              │
+                    ┌──────────▼───┐  ┌───────▼──────────┐
+                    │   Whisper    │  │     Whisper        │
+                    │  (fast mode) │  │  (accurate mode)   │
+                    └──────────┬───┘  └───────┬──────────┘
+                               │              │
+                    ┌──────────▼───┐  ┌───────▼──────────┐
+                    │  Transcript  │  │      Ollama        │
+                    │   panel      │  │  (term analysis)   │
+                    │  (~2s delay) │  └───────┬──────────┘
+                    └──────────────┘          │
+                                    ┌─────────▼──────────┐
+                                    │    Term Cards        │
+                                    │   (~10s delay)       │
+                                    └────────────────────┘
+                                              │
+                                    ┌─────────▼──────────┐
+                                    │  Browser via SSE    │
+                                    │  (Mac or iPhone)    │
+                                    └────────────────────┘
+```
+
+**Pipeline A** — runs every 2 seconds with Whisper in fast mode (beam_size=1). Sends transcribed text to the live transcript panel almost immediately.
+
+**Pipeline B** — accumulates 8 seconds of audio with 1 second of overlap, transcribes with high-accuracy beam search (beam_size=5), then sends to Ollama for term detection. Term cards appear roughly every 8–12 seconds depending on your Mac's speed.
+
+Both pipelines share the same audio input stream. Pipeline B runs in a dedicated worker thread so it never blocks Pipeline A.
+
+---
+
+## Focus Domains
+
+Meeting Side-Ear only surfaces terms from these enterprise domains:
+
+- **AI & Machine Learning** — LLMs, RAG, agents, watsonx, foundation models, embeddings
+- **AI & Data Governance** — model risk, explainability, bias, SR 11-7, OpenPages, data lineage
+- **Automation & Orchestration** — RPA, AIOps, MLOps, Cloud Pak, intelligent automation
+- **Data & Analytics** — data fabric, data mesh, DataOps, ETL, Db2, InfoSphere, Cognos
+- **Cloud & Infrastructure** — hybrid cloud, OpenShift, Kubernetes, IBM Z, IBM Power, Red Hat
+- **Networking & Security** — zero trust, QRadar, SIEM, SOAR, IAM, encryption, tokenization
+- **Banking & Financial Services** — AML, KYC, ISO 20022, SWIFT, Basel III/IV, DORA, fraud detection
+- **Integration & Middleware** — IBM MQ, App Connect, API Connect, event streaming, SOA
+
+Generic words, people's names, and vague business terms are explicitly filtered out.
 
 ---
 
@@ -11,9 +72,10 @@ Real-time tech term detector. Listens to your Mac's audio (calls, tutorials, vid
 | Task | Tool | Cost |
 |---|---|---|
 | Audio capture | BlackHole (virtual driver) | Free |
-| Transcription | faster-whisper (local) | Free |
-| AI analysis | Ollama + llama3.2 (local) | Free |
-| Dashboard | Flask web server | Free |
+| Live transcript | faster-whisper local, beam=1 | Free |
+| Term transcription | faster-whisper local, beam=5 | Free |
+| AI term analysis | Ollama + llama3.2 local | Free |
+| Dashboard | Flask + SSE | Free |
 
 ---
 
@@ -25,80 +87,66 @@ BlackHole lets Python capture your Mac's system audio.
 
 1. Download from: https://existential.audio/blackhole/ (grab the **2ch** version)
 2. Install it
-3. Go to **System Settings → Sound → Output** → select **BlackHole 2ch**
+3. Open **Audio MIDI Setup** (Spotlight it) → click **+** → **Create Multi-Output Device**
+4. Check both **BlackHole 2ch** and your speakers/headphones
+5. Go to **System Settings → Sound → Output** → click the gear icon → **Use This Device For Sound Output**
 
-> **Hear audio AND capture it simultaneously:**
-> Open **Audio MIDI Setup** (Spotlight it) → click **+** → **Create Multi-Output Device**
-> → check both **BlackHole 2ch** and your speakers/headphones.
-> Set that Multi-Output Device as your system output.
-
----
-
-### 2. Make sure Ollama is running with a model
-
-You already have Ollama installed. Just make sure it's running and has llama3.2:
+### 2. Make sure Ollama is running
 
 ```bash
-ollama serve          # start Ollama if it's not running
-ollama pull llama3.2  # download the model (one time, ~2GB)
+ollama serve
+ollama pull llama3.2   # if not already pulled
 ```
-
-To use a different model:
-```bash
-export OLLAMA_MODEL=mistral   # or phi3, gemma2, etc.
-```
-
----
 
 ### 3. Run
 
 ```bash
+cd techradar
 bash run.sh
 ```
 
-The script will:
-- Create a Python virtual environment
-- Install faster-whisper and Flask
-- Download the Whisper "small" model (~150MB, first run only)
-- Check Ollama is running
-- Print your phone URL
+Open on **Mac**: `http://localhost:5001`
+Open on **iPhone**: `http://<your-mac-ip>:5001` (same WiFi)
 
----
-
-## Open on your phone
-
-The script prints something like:
+To find your Mac's current IP:
+```bash
+ipconfig getifaddr en0
 ```
-Phone: http://192.168.1.42:5000
-```
-Open that in Safari/Chrome on your phone (same WiFi). You'll see cards appear in real time.
 
 ---
 
 ## Tuning
 
-**Whisper model size** — tradeoff between speed and accuracy:
+**Whisper model** — tradeoff between accuracy (especially accents) and speed:
 ```bash
-export WHISPER_MODEL=tiny    # fastest, least accurate
-export WHISPER_MODEL=small   # default, great balance
-export WHISPER_MODEL=medium  # more accurate, slower
+export WHISPER_MODEL=small    # faster, less accurate
+export WHISPER_MODEL=medium   # default, good accent handling
+export WHISPER_MODEL=large    # most accurate, slowest
 ```
 
 **Ollama model:**
 ```bash
-export OLLAMA_MODEL=llama3.2   # default
-export OLLAMA_MODEL=mistral    # good alternative
-export OLLAMA_MODEL=phi3       # smaller/faster
+export OLLAMA_MODEL=llama3.2:3b   # default
+export OLLAMA_MODEL=mistral       # good alternative
+export OLLAMA_MODEL=phi3          # smaller/faster
+```
+
+**Pipeline timing** — edit these constants in `app.py`:
+```python
+PREVIEW_CHUNK_SECS  = 2   # Pipeline A: how often transcript updates
+ANALYSIS_CHUNK_SECS = 8   # Pipeline B: how often term cards appear
 ```
 
 ---
 
-## How it works
+## Dashboard layout
 
-```
-Mac Audio → BlackHole (loopback) → sounddevice
-         → 8-second chunks
-         → faster-whisper (local transcription)
-         → Ollama / llama3.2 (tech term detection)
-         → Flask SSE → Browser (Mac or phone)
-```
+**Desktop (3 columns):**
+- Left: live term cards feed
+- Center: detail panel (click "+ more" on any card)
+- Right: controls, stats, live transcript
+
+**iPhone (single column + bottom sheet):**
+- Full-width term cards
+- Tap "+ more" → detail slides up from bottom
+- Fixed toolbar at bottom: Start/Stop/Clear

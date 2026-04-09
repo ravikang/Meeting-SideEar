@@ -16,19 +16,20 @@ app = Flask(__name__)
 CORS(app)
 
 # ── Config ────────────────────────────────────────────────────
-WHISPER_MODEL_SIZE = os.environ.get("WHISPER_MODEL", "small")
-OLLAMA_URL         = os.environ.get("OLLAMA_URL",    "http://localhost:11434")
-OLLAMA_MODEL       = os.environ.get("OLLAMA_MODEL",  "llama3.2")
-SAMPLE_RATE        = 16000
-CHUNK_DURATION     = 8
-OVERLAP            = 1
+WHISPER_MODEL_SIZE  = os.environ.get("WHISPER_MODEL", "medium")
+OLLAMA_URL          = os.environ.get("OLLAMA_URL",    "http://localhost:11434")
+OLLAMA_MODEL        = os.environ.get("OLLAMA_MODEL",  "llama3.2")
+SAMPLE_RATE         = 16000
+PREVIEW_CHUNK_SECS  = 2   # Pipeline A: live transcript cadence
+ANALYSIS_CHUNK_SECS = 8   # Pipeline B: Ollama term detection cadence
+OVERLAP_SECS        = 1
 
 # ── Load Whisper ──────────────────────────────────────────────
 print(f"Loading Whisper '{WHISPER_MODEL_SIZE}'...")
 whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device="cpu", compute_type="int8")
 print("✓ Whisper ready")
 
-# ── Resolve Ollama model name ─────────────────────────────────
+# ── Resolve Ollama model ──────────────────────────────────────
 def resolve_model(requested):
     try:
         with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=3) as r:
@@ -49,14 +50,83 @@ print(f"✓ Ollama model: {OLLAMA_MODEL}")
 
 # ── Shared state ──────────────────────────────────────────────
 state = {
-    "listening":  False,
-    "cards":      [],
-    "status":     "idle",
+    "listening": False,
+    "cards":     [],
+    "status":    "idle",
 }
 seen_terms      = set()
 sse_clients     = []
 audio_thread    = None
 card_id_counter = 0
+
+# ── Focused taxonomy ──────────────────────────────────────────
+FOCUS_DOMAINS = """
+DOMAINS TO DETECT (only catch terms from these areas):
+
+AI & Machine Learning:
+  AI, ML, deep learning, neural network, NLP, computer vision, foundation model,
+  large language model, LLM, generative AI, gen AI, RAG, retrieval augmented generation,
+  prompt engineering, fine-tuning, embeddings, vector database, AI agent, agentic AI,
+  reinforcement learning, transformer, diffusion model, multimodal AI, watsonx,
+  IBM watsonx, Watson, IBM Watson
+
+AI & Data Governance:
+  AI governance, model risk management, explainability, bias detection, model drift,
+  hallucination, responsible AI, trustworthy AI, AI ethics, fairness, transparency,
+  auditability, SR 11-7, model validation, OpenScale, IBM OpenPages, OpenPages,
+  data governance, data lineage, data catalog, metadata management, master data management,
+  MDM, data quality, data stewardship, data mesh, data fabric
+
+Automation & Orchestration:
+  RPA, robotic process automation, intelligent automation, hyperautomation,
+  workflow orchestration, business process automation, BPA, AIOps, MLOps, LLMOps,
+  event-driven architecture, EDA, iPaaS, IBM Cloud Pak, Cloud Pak for Integration,
+  Cloud Pak for Data, API management, API gateway
+
+Data & Analytics:
+  data lakehouse, data lake, data warehouse, data platform, DataOps,
+  ETL, ELT, CDC, change data capture, data pipeline, data streaming,
+  Apache Kafka, Spark, IBM Db2, Db2, IBM InfoSphere, InfoSphere,
+  real-time analytics, business intelligence, BI, predictive analytics,
+  IBM Cognos, Cognos, data virtualization, federated data
+
+Cloud & Infrastructure:
+  hybrid cloud, multi-cloud, IBM Cloud, Red Hat, OpenShift, Red Hat OpenShift,
+  Kubernetes, containerization, Docker, bare metal, edge computing,
+  IBM Z, mainframe, IBM Power, cloud-native, serverless, microservices,
+  service mesh, Istio, infrastructure as code, IaC, Terraform, Ansible
+
+Networking & Security:
+  zero trust, SASE, SD-WAN, IBM QRadar, QRadar, SOAR, SIEM,
+  threat intelligence, identity and access management, IAM,
+  privileged access management, PAM, IBM MQ, MQ messaging,
+  encryption, tokenization, data masking, DLP, data loss prevention,
+  cyber resilience, incident response
+
+Banking & Financial Services:
+  core banking, payment rails, SWIFT, ISO 20022, open banking, PSD2,
+  anti-money laundering, AML, know your customer, KYC,
+  credit risk modeling, fraud detection, real-time payments,
+  Basel III, Basel IV, DORA, regulatory reporting, stress testing,
+  financial crime, sanctions screening, collateral management
+
+Integration & Middleware:
+  IBM MQ, IBM App Connect, App Connect, API Connect, IBM API Connect,
+  event streaming, message broker, ESB, enterprise service bus,
+  service-oriented architecture, SOA, IBM Integration Bus
+"""
+
+BLOCKLIST = {
+    "strategy", "approach", "solution", "management", "simplification",
+    "transformation", "initiative", "journey", "framework", "platform",
+    "technology", "technologies", "tool", "tools", "system", "systems",
+    "process", "processes", "capability", "capabilities", "environment",
+    "environments", "workload", "workloads", "infrastructure", "layer",
+    "layers", "component", "components", "service", "services",
+    "devops", "agile", "digital", "innovation", "ecosystem", "landscape",
+    "architecture", "integration", "automation", "analytics", "data",
+    "cloud", "security", "network", "application", "applications",
+}
 
 # ── Audio helpers ─────────────────────────────────────────────
 def get_blackhole_device():
@@ -66,7 +136,7 @@ def get_blackhole_device():
                 return i
     return None
 
-def transcribe(audio: np.ndarray) -> str:
+def transcribe(audio: np.ndarray, beam_size: int = 3) -> str:
     if not len(audio):
         return ""
     audio = audio.astype(np.float32)
@@ -75,9 +145,9 @@ def transcribe(audio: np.ndarray) -> str:
         audio /= peak
     try:
         segs, _ = whisper_model.transcribe(
-            audio, language="en", beam_size=3,
+            audio, language="en", beam_size=beam_size,
             vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 300},
+            vad_parameters={"min_silence_duration_ms": 200},
         )
         return " ".join(s.text for s in segs).strip()
     except Exception as e:
@@ -86,7 +156,6 @@ def transcribe(audio: np.ndarray) -> str:
 
 # ── Ollama helpers ────────────────────────────────────────────
 def ollama_generate(prompt: str, max_tokens: int = 2000) -> str:
-    """Call Ollama and return raw response string."""
     payload = json.dumps({
         "model":   OLLAMA_MODEL,
         "prompt":  prompt,
@@ -103,14 +172,10 @@ def ollama_generate(prompt: str, max_tokens: int = 2000) -> str:
         return json.loads(resp.read())["response"].strip()
 
 def extract_json_array(raw: str):
-    """Robustly extract a JSON array from a possibly-messy string."""
-    # Strip markdown fences
     raw = re.sub(r"```json|```", "", raw).strip()
-    # Find the outermost [ ... ]
     start = raw.find("[")
     if start == -1:
         return []
-    # Try clean parse
     end = raw.rfind("]")
     if end > start:
         try:
@@ -119,7 +184,6 @@ def extract_json_array(raw: str):
                 return result
         except json.JSONDecodeError:
             pass
-    # Truncated response — extract individual complete objects
     recovered = []
     for m in re.finditer(r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}', raw[start:]):
         try:
@@ -133,14 +197,15 @@ def extract_json_array(raw: str):
     return recovered
 
 def describe_term(term: str):
-    """Fallback: get summary+detail for a single term."""
     prompt = (
-        f'Define the tech term "{term}". '
+        'You are an expert in IBM technology, AI, data, banking, and cloud infrastructure. '
+        f'Define the term "{term}" as used in enterprise AI, data, or banking contexts. '
         'Reply with ONLY this JSON (no markdown): '
-        '{"summary":"one sentence under 20 words","detail":"3 to 6 sentences covering what it is, how it works, why it matters, and common use cases"}'
+        '{"summary":"one sentence under 20 words","detail":"3 to 6 sentences: what it is, '
+        'how it works, why it matters in banking or enterprise AI, and IBM-specific context if relevant"}'
     )
     try:
-        raw = ollama_generate(prompt, max_tokens=300)
+        raw = ollama_generate(prompt, max_tokens=400)
         start = raw.find("{"); end = raw.rfind("}") + 1
         if start != -1 and end > start:
             obj = json.loads(raw[start:end])
@@ -149,36 +214,47 @@ def describe_term(term: str):
         print(f"[describe_term error] {e}")
     return "", ""
 
-# ── Main analysis ─────────────────────────────────────────────
-SYSTEM_PROMPT = """\
-You extract specific tech terms from spoken transcripts and return JSON only.
+def is_likely_persons_name(term: str) -> bool:
+    words = term.strip().split()
+    if len(words) == 1:
+        w = words[0]
+        if len(w) > 1 and w[0].isupper() and w[1:].islower() and len(w) < 12:
+            return True
+    return False
 
-RULES:
-- Only include terms explicitly spoken in the transcript
-- Skip generic words (language, framework, database, technology, solution, approach, management, simplification) unless a SPECIFIC named one is mentioned
-- DO include: product names, protocols, platforms, DevOps concepts, cloud services, named architectures, specific tools
-- Each term needs:
-  "summary": 1 sentence max 20 words — what it is at a glance
-  "detail": 3 to 6 sentences — cover what it is, how it works, why it matters, and real-world use cases
-- Return ONLY a valid JSON array — no explanation, no markdown
-
-OUTPUT FORMAT:
-[{"term":"<term>","category":"<tool|framework|language|protocol|concept|cloud|database|security|pattern>","summary":"<summary>","detail":"<detail>"}]
-
-If no specific tech terms: []"""
+# ── System prompt ─────────────────────────────────────────────
+SYSTEM_PROMPT = (
+    "You are a specialist term extractor for enterprise meetings about AI, data, banking, "
+    "IBM technology, cloud, and IT infrastructure.\n\n"
+    "YOUR JOB: Read the transcript and extract ONLY terms that appear in the DOMAINS list below.\n\n"
+    + FOCUS_DOMAINS +
+    "\nSTRICT RULES:\n"
+    "1. ONLY extract terms explicitly spoken in the transcript — never invent or infer\n"
+    "2. NEVER extract people's names, company names, or place names\n"
+    "3. NEVER extract generic words like: strategy, approach, solution, journey, transformation, "
+    "workload, environment, layer, component, landscape, ecosystem, platform, tool, process\n"
+    "4. A term must match one of the domains above to qualify\n"
+    "5. Prefer specific named products/protocols over generic concepts\n"
+    "6. Each term needs:\n"
+    '   "summary": 1 sentence max 20 words\n'
+    '   "detail": 3-6 sentences covering what it is, how it works, '
+    "why it matters in banking/enterprise AI, IBM context where relevant\n"
+    "7. Return ONLY a valid JSON array — no prose, no markdown\n\n"
+    "OUTPUT FORMAT:\n"
+    '[{"term":"<term>","category":"<ai|llm|governance|automation|data|cloud|security|banking|integration>","summary":"<summary>","detail":"<detail>"}]\n\n'
+    "If no qualifying terms found: []"
+)
 
 def analyze(transcript: str) -> list:
     global card_id_counter
-
     if not transcript or len(transcript) < 20:
         return []
 
-    # Build prompt — use explicit string concat to avoid f-string brace issues
     prompt = SYSTEM_PROMPT + "\n\nTRANSCRIPT:\n" + transcript + "\n\nJSON array:"
 
     try:
         raw   = ollama_generate(prompt)
-        print(f"[Ollama] {raw[:120]}...")
+        print(f"[Ollama] {raw[:150]}...")
         terms = extract_json_array(raw)
     except Exception as e:
         print(f"[Ollama error] {e}")
@@ -191,6 +267,12 @@ def analyze(transcript: str) -> list:
         term = t.get("term", "").strip()
         if not term:
             continue
+        if term.lower() in BLOCKLIST:
+            print(f"[Filtered - blocklist] {term}")
+            continue
+        if is_likely_persons_name(term):
+            print(f"[Filtered - name] {term}")
+            continue
         key = term.lower()
         if key in seen_terms:
             continue
@@ -198,8 +280,6 @@ def analyze(transcript: str) -> list:
 
         summary = t.get("summary", "").strip()
         detail  = t.get("detail",  "").strip()
-
-        # Fallback if model skipped descriptions
         if not summary or not detail:
             summary, detail = describe_term(term)
 
@@ -208,7 +288,7 @@ def analyze(transcript: str) -> list:
             "id":        card_id_counter,
             "term":      term,
             "category":  t.get("category", "concept").strip(),
-            "summary":   summary or f"A technical term: {term}",
+            "summary":   summary or f"{term} — a term from enterprise AI or banking technology.",
             "detail":    detail  or "",
             "timestamp": time.strftime("%H:%M:%S"),
         })
@@ -231,8 +311,36 @@ def broadcast(event: str, data: dict):
         except ValueError:
             pass
 
-# ── Audio loop ────────────────────────────────────────────────
+# ── Pipeline B: analysis worker thread ───────────────────────
+def analysis_worker(analysis_queue):
+    """
+    Consumes 8-second audio chunks from the queue, transcribes them
+    with high-accuracy beam search, then sends to Ollama for term detection.
+    Runs in its own thread so it never blocks Pipeline A.
+    """
+    while state["listening"] or not analysis_queue.empty():
+        try:
+            chunk = analysis_queue.get(timeout=1)
+        except queue.Empty:
+            continue
+        print("\n[Pipeline B] Transcribing chunk for analysis...")
+        tx = transcribe(chunk, beam_size=5)
+        print(f"[Pipeline B TX] {tx}")
+        if tx:
+            for card in analyze(tx):
+                state["cards"].insert(0, card)
+                broadcast("card", card)
+
+# ── Pipeline A + B coordinator ────────────────────────────────
 def audio_loop():
+    """
+    Main audio capture loop. Maintains two independent pipelines:
+
+    Pipeline A (fast) — reads every 2s, beam_size=1 → live transcript
+    Pipeline B (slow) — accumulates 8s, beam_size=5 → Ollama term cards
+
+    Both pipelines share the same input stream.
+    """
     idx = get_blackhole_device()
     if idx is None:
         broadcast("error", {"message": "BlackHole not found. Install it and set it as Mac output."})
@@ -240,52 +348,71 @@ def audio_loop():
         state["status"]    = "error"
         return
 
-    dev      = sd.query_devices(idx)
-    channels = min(2, int(dev["max_input_channels"]))
-    chunk_n  = int(SAMPLE_RATE * CHUNK_DURATION)
-    overlap_n = int(SAMPLE_RATE * OVERLAP)
-    buf      = np.zeros(0, dtype=np.float32)
-    seen_tx  = set()
+    dev       = sd.query_devices(idx)
+    channels  = min(2, int(dev["max_input_channels"]))
+
+    preview_n  = int(SAMPLE_RATE * PREVIEW_CHUNK_SECS)
+    analysis_n = int(SAMPLE_RATE * ANALYSIS_CHUNK_SECS)
+    overlap_n  = int(SAMPLE_RATE * OVERLAP_SECS)
+
+    # Mutable buffers stored in a dict so the callback can update them
+    buffers = {
+        "audio":    np.zeros(0, dtype=np.float32),
+        "analysis": np.zeros(0, dtype=np.float32),
+    }
+    seen_tx        = set()
+    analysis_queue = queue.Queue(maxsize=4)
 
     broadcast("status", {"status": "listening", "device": dev["name"]})
     state["status"] = "listening"
     print(f"[Audio] Capturing from: {dev['name']}")
+    print(f"[Pipelines] A={PREVIEW_CHUNK_SECS}s transcript  B={ANALYSIS_CHUNK_SECS}s analysis")
+
+    # Start Pipeline B worker thread
+    worker = threading.Thread(
+        target=analysis_worker, args=(analysis_queue,), daemon=True
+    )
+    worker.start()
 
     def cb(indata, frames, t, status):
-        nonlocal buf
         mono = indata[:, 0] if indata.ndim > 1 else indata.flatten()
-        buf  = np.concatenate([buf, mono])
+        buffers["audio"] = np.concatenate([buffers["audio"], mono])
 
     with sd.InputStream(device=idx, samplerate=SAMPLE_RATE,
                         channels=channels, dtype="float32", callback=cb):
         while state["listening"]:
-            if len(buf) >= chunk_n:
-                chunk = buf[:chunk_n].copy()
-                buf   = buf[chunk_n - overlap_n:]
 
-                rms = float(np.sqrt(np.mean(chunk ** 2)))
+            if len(buffers["audio"]) >= preview_n:
+                # Grab a preview chunk
+                chunk_a          = buffers["audio"][:preview_n].copy()
+                buffers["audio"] = buffers["audio"][preview_n:]
+
+                rms = float(np.sqrt(np.mean(chunk_a ** 2)))
                 print(f"[Audio] RMS={rms:.4f}", end="\r")
 
-                if rms < 0.001:
-                    time.sleep(0.1)
-                    continue
+                # Pipeline A — fast live transcript (beam=1 for speed)
+                if rms >= 0.001:
+                    tx = transcribe(chunk_a, beam_size=1)
+                    if tx and tx not in seen_tx:
+                        seen_tx.add(tx)
+                        if len(seen_tx) > 200:
+                            seen_tx = set(list(seen_tx)[-100:])
+                        print(f"\n[A] {tx}")
+                        broadcast("transcript", {"text": tx})
 
-                print()
-                tx = transcribe(chunk)
-                print(f"[TX] {tx}")
+                # Accumulate for Pipeline B
+                buffers["analysis"] = np.concatenate([buffers["analysis"], chunk_a])
 
-                if tx and tx not in seen_tx:
-                    seen_tx.add(tx)
-                    if len(seen_tx) > 100:
-                        seen_tx = set(list(seen_tx)[-50:])
+                # Pipeline B — hand off when we have a full analysis chunk
+                if len(buffers["analysis"]) >= analysis_n:
+                    chunk_b             = buffers["analysis"][:analysis_n].copy()
+                    buffers["analysis"] = buffers["analysis"][analysis_n - overlap_n:]
+                    if not analysis_queue.full():
+                        analysis_queue.put_nowait(chunk_b)
+                    else:
+                        print("\n[B] Queue full — dropping chunk")
 
-                    broadcast("transcript", {"text": tx})
-
-                    for card in analyze(tx):
-                        state["cards"].insert(0, card)
-                        broadcast("card", card)
-
-            time.sleep(0.2)
+            time.sleep(0.05)
 
     state["status"] = "idle"
     broadcast("status", {"status": "idle"})
@@ -332,12 +459,12 @@ def status():
 
 @app.route("/api/devices")
 def devices():
-    devs      = [{"index": i, "name": d["name"]}
-                 for i, d in enumerate(sd.query_devices())
-                 if d["max_input_channels"] > 0]
-    bh        = get_blackhole_device()
-    ok        = False
-    models    = []
+    devs   = [{"index": i, "name": d["name"]}
+               for i, d in enumerate(sd.query_devices())
+               if d["max_input_channels"] > 0]
+    bh     = get_blackhole_device()
+    ok     = False
+    models = []
     try:
         with urllib.request.urlopen(f"{OLLAMA_URL}/api/tags", timeout=3) as r:
             models = [m["name"] for m in json.loads(r.read()).get("models", [])]
@@ -382,9 +509,11 @@ if __name__ == "__main__":
         local_ip = socket.gethostbyname(socket.gethostname())
     except Exception:
         local_ip = "your-mac-ip"
-    print(f"\n📡 TechRadar")
-    print(f"   Whisper : {WHISPER_MODEL_SIZE}")
-    print(f"   Ollama  : {OLLAMA_MODEL}")
+    print(f"\n👂 Meeting Side-Ear")
+    print(f"   Whisper  : {WHISPER_MODEL_SIZE}")
+    print(f"   Ollama   : {OLLAMA_MODEL}")
+    print(f"   Pipeline A (transcript) : every {PREVIEW_CHUNK_SECS}s")
+    print(f"   Pipeline B (term cards) : every {ANALYSIS_CHUNK_SECS}s")
     print(f"\n   Local  : http://localhost:5001")
     print(f"   Phone  : http://{local_ip}:5001\n")
     app.run(host="0.0.0.0", port=5001, debug=False, threaded=True)
